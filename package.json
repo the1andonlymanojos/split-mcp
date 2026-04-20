@@ -1,14 +1,11 @@
 {
   "name": "splitwise-mcp",
-  "module": "index.ts",
+  "module": "oauth-mcp.ts",
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run server.ts",
-    "dev:watch": "bun --watch server.ts",
-    "start": "bun run server.ts",
-    "oauth-mcp": "bun run oauth-mcp.ts",
-    "oauth-mcp:watch": "bun --watch oauth-mcp.ts"
+    "dev": "bun --watch oauth-mcp.ts",
+    "start": "bun run oauth-mcp.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
