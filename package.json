@@ -1,0 +1,22 @@
+{
+  "name": "splitwise-mcp",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run server.ts",
+    "dev:watch": "bun --watch server.ts",
+    "start": "bun run server.ts",
+    "oauth-mcp": "bun run oauth-mcp.ts",
+    "oauth-mcp:watch": "bun --watch oauth-mcp.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}
