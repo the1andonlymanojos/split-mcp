@@ -91,37 +91,14 @@ async function route(req: Request, url: URL): Promise<Response> {
   // variant (`/mcp/.well-known/...`). We serve the same payload from all of
   // them so discovery converges in a single hop instead of cascading through
   // 404s that make clients drop their bearer and re-run the OAuth dance.
-  if (
-    url.pathname === "/.well-known/oauth-authorization-server" ||
-    url.pathname === "/.well-known/oauth-authorization-server/mcp" ||
-    url.pathname === "/mcp/.well-known/oauth-authorization-server"
-  ) {
+  if (url.pathname === "/" && req.method === "GET") {
+    return landingPage();
+  }
+  if (url.pathname === "/.well-known/oauth-authorization-server") {
     return authorizationServerMetadata();
   }
-
-  // Protected-Resource metadata (RFC 9728). Same reasoning as above.
-  if (
-    url.pathname === "/.well-known/oauth-protected-resource" ||
-    url.pathname === "/.well-known/oauth-protected-resource/mcp" ||
-    url.pathname === "/mcp/.well-known/oauth-protected-resource"
-  ) {
+  if (url.pathname === "/.well-known/oauth-protected-resource") {
     return protectedResourceMetadata();
-  }
-
-  // Some clients probe OpenID Connect discovery before falling back to
-  // plain OAuth. We're not an OIDC provider, so we return a plain 404 with
-  // NO body and NO content-type. It matters that the body is empty and is
-  // not JSON: opencode / MCP SDK's OAuth client parses any JSON body
-  // containing an `error` field as an RFC 6749 §5.2 OAuth error response,
-  // even on 404s — so shapes like `{"error":"not_an_openid_provider"}`
-  // cause the whole authorization flow to abort mid-callback. An empty
-  // 404 is the unambiguous "not available here, move on" signal.
-  if (
-    url.pathname === "/.well-known/openid-configuration" ||
-    url.pathname === "/.well-known/openid-configuration/mcp" ||
-    url.pathname === "/mcp/.well-known/openid-configuration"
-  ) {
-    return new Response(null, { status: 404 });
   }
 
   // --- OAuth dance ---
