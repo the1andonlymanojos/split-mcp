@@ -21,7 +21,7 @@
  *
  * Each logical store has its own key prefix in Redis. Values are JSON.
  * TTLs are attached via SETEX so Redis evicts them automatically — we never
- * have to sweep stale entries ourselves.
+ * have to sweep s tale entries ourselves.
  *
  * Authorization codes are one-shot: `consumeAuthCode` deletes the key as part
  * of consumption so a replay just returns `unknown_code`.
