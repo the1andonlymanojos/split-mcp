@@ -74,7 +74,11 @@ export async function handleMcp(req: Request): Promise<Response> {
   if (incomingSid) {
     const entry = sessions.get(incomingSid);
     if (!entry) {
-      log("MCP unknown session", { incomingSid });
+      log("MCP unknown session", {
+        incomingSid,
+        method: req.method,
+        activeSessions: sessions.size,
+      });
       return json({ error: "session_not_found" }, { status: 404 });
     }
     entry.lastUsed = Date.now();
@@ -127,6 +131,13 @@ export async function handleMcp(req: Request): Promise<Response> {
       log("MCP session closed", { sid });
     },
   });
+  transport.onerror = (err) => {
+    const error =
+      err instanceof Error
+        ? { name: err.name, message: err.message, stack: err.stack }
+        : err;
+    log("MCP transport error", { error });
+  };
 
   const server = buildMcpServer();
   await server.connect(transport);
