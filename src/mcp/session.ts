@@ -72,6 +72,7 @@ export async function handleMcp(req: Request): Promise<Response> {
   // --- New session. Spin up a fresh server+transport pair. ---
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => crypto.randomUUID(),
+    enableJsonResponse: true,
     onsessioninitialized: (sid: string) => {
       sessions.set(sid, transport);
       log("MCP session initialized", { sid });
