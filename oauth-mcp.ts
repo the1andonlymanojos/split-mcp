@@ -32,7 +32,7 @@
  *   *    /mcp                                       - MCP endpoint (bearer required)
  */
 
-import { BASE_URL, PORT, REDIS_URL, SPLITWISE_REDIRECT_URI } from "./src/config";
+import { BASE_URL, PORT, SPLITWISE_REDIRECT_URI } from "./src/config";
 import { log } from "./src/logger";
 import { handleMcp } from "./src/mcp/session";
 import "dotenv/config";
@@ -46,22 +46,6 @@ import {
   handleToken,
   protectedResourceMetadata,
 } from "./src/oauth/routes";
-import { redisInit } from "./src/redis";
-
-// Fail fast if Redis is unreachable — all persistent state (OAuth codes,
-// bearer tokens, response cache) depends on it.
-try {
-  await redisInit();
-} catch (err) {
-  console.error(
-    `\nFailed to connect to Redis at ${REDIS_URL}. Is it running?\n` +
-      `  macOS: brew services start redis\n` +
-      `  linux: sudo systemctl start redis\n` +
-      `Override REDIS_URL in .env if Redis is elsewhere.\n`
-  );
-  console.error(err);
-  process.exit(1);
-}
 
 Bun.serve({
   port: PORT,

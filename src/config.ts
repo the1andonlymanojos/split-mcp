@@ -37,16 +37,10 @@ export const SPLITWISE_AUTHORIZE_URL = "https://secure.splitwise.com/oauth/autho
 export const SPLITWISE_TOKEN_URL = "https://secure.splitwise.com/oauth/token";
 export const SPLITWISE_API_BASE = "https://secure.splitwise.com/api/v3.0";
 
-// Lifetimes for OAuth state stored in Redis.
+// Lifetimes for OAuth state stored in process memory.
 export const PENDING_TTL_MS = 10 * 60_000; //       /authorize -> Splitwise round-trip
 export const CODE_TTL_MS = 60_000; //                our authorization codes
 export const TOKEN_TTL_MS = 30 * 24 * 60 * 60_000; // our bearer tokens (30 days)
-
-/**
- * Redis connection string. `Bun.redis` reads `REDIS_URL` automatically but we
- * re-export it here so the rest of the code has a single place to look.
- */
-export const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 
 /**
  * TTLs for cached Splitwise API responses (seconds). Tuned to balance

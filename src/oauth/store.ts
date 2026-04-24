@@ -1,44 +1,28 @@
 /**
- * Persistent state for our OAuth Authorization Server, stored in Redis.
+ * In-memory state for our OAuth Authorization Server.
  *
- * Three logical stores model the flow:
+ * Three maps model the flow:
  *
  *   pendingAuths  key = `state` we send to Splitwise
  *                 value = where to redirect the MCP client when Splitwise
  *                         comes back.
- *                 ttl = PENDING_TTL_MS
  *
  *   codes         key = the one-time authorization code we issue to the MCP
  *                       client.
  *                 value = the Splitwise access token we got on their behalf.
- *                 ttl = CODE_TTL_MS
  *
  *   tokens        key = our bearer token (what MCP clients put in the
- *                       `Authorization: Bearer …` header).
+ *                       `Authorization: Bearer ...` header).
  *                 value = the Splitwise access token to proxy tool calls
  *                         with.
- *                 ttl = TOKEN_TTL_MS
  *
- * Each logical store has its own key prefix in Redis. Values are JSON.
- * TTLs are attached via SETEX so Redis evicts them automatically — we never
- * have to sweep stale entries ourselves.
- *
- * Authorization codes are one-shot: `consumeAuthCode` deletes the key as part
- * of consumption so a replay just returns `unknown_code`.
+ * Everything here is in-memory and wiped on restart: good enough for a POC,
+ * swap for a KV store for production.
  */
 
 import { CODE_TTL_MS, PENDING_TTL_MS, TOKEN_TTL_MS } from "../config";
 import { log } from "../logger";
 import { randomToken } from "../http";
-import { redisDel, redisGet, redisSetEx } from "../redis";
-
-const PENDING_PREFIX = "oauth:pending:";
-const CODE_PREFIX = "oauth:code:";
-const TOKEN_PREFIX = "oauth:token:";
-
-function msToSec(ms: number): number {
-  return Math.max(1, Math.floor(ms / 1000));
-}
 
 // ---------- PENDING AUTHS (between /authorize and Splitwise callback) ----------
 
@@ -50,28 +34,25 @@ export type PendingAuth = {
   codeChallenge?: string;
   /** "S256" (preferred / required by MCP) or "plain". Absent = no PKCE. */
   codeChallengeMethod?: "S256" | "plain";
+  expiresAt: number;
 };
 
-export async function createPendingAuth(entry: PendingAuth): Promise<string> {
+const pendingAuths = new Map<string, PendingAuth>();
+
+export function createPendingAuth(
+  entry: Omit<PendingAuth, "expiresAt">
+): string {
   const state = randomToken(16);
-  await redisSetEx(
-    PENDING_PREFIX + state,
-    msToSec(PENDING_TTL_MS),
-    JSON.stringify(entry)
-  );
+  pendingAuths.set(state, { ...entry, expiresAt: Date.now() + PENDING_TTL_MS });
   return state;
 }
 
-export async function consumePendingAuth(state: string): Promise<PendingAuth | null> {
-  const key = PENDING_PREFIX + state;
-  const raw = await redisGet(key);
-  if (!raw) return null;
-  await redisDel(key);
-  try {
-    return JSON.parse(raw) as PendingAuth;
-  } catch {
-    return null;
-  }
+export function consumePendingAuth(state: string): PendingAuth | null {
+  const pending = pendingAuths.get(state);
+  if (!pending) return null;
+  pendingAuths.delete(state);
+  if (Date.now() > pending.expiresAt) return null;
+  return pending;
 }
 
 // ---------- AUTHORIZATION CODES (our /token endpoint consumes these) ----------
@@ -84,26 +65,35 @@ export type AuthCode = {
   /** PKCE code_challenge from the /authorize request, carried through to /token. */
   codeChallenge?: string;
   codeChallengeMethod?: "S256" | "plain";
+  expiresAt: number;
+  used: boolean;
 };
 
-export async function issueAuthCode(params: {
+const codes = new Map<string, AuthCode>();
+
+export function issueAuthCode(params: {
   mcpClientId: string;
   mcpClientRedirectUri: string;
   splitwiseToken: string;
   codeChallenge?: string;
   codeChallengeMethod?: "S256" | "plain";
-}): Promise<string> {
+}): string {
   const code = randomToken(16);
-  const entry: AuthCode = { code, ...params };
-  await redisSetEx(CODE_PREFIX + code, msToSec(CODE_TTL_MS), JSON.stringify(entry));
+  const entry: AuthCode = {
+    code,
+    ...params,
+    expiresAt: Date.now() + CODE_TTL_MS,
+    used: false,
+  };
+  codes.set(code, entry);
   log("OUR code issued", { code, mcpClientId: params.mcpClientId });
   return code;
 }
 
 /**
  * Atomically consume a one-shot code. Returns the entry when it's valid and
- * deletes it from Redis so a replay fails. All error branches also delete
- * the key for good measure.
+ * marks it as used so a replay fails. All error branches delete the entry
+ * for good measure.
  *
  * When the original /authorize carried a PKCE `code_challenge`, the caller
  * must supply a matching `codeVerifier` — this implements RFC 7636 §4.6.
@@ -115,20 +105,17 @@ export async function consumeAuthCode(
   redirectUri: string,
   codeVerifier?: string
 ): Promise<{ ok: true; entry: AuthCode } | { ok: false; reason: string }> {
-  const key = CODE_PREFIX + code;
-  const raw = await redisGet(key);
-  if (!raw) return { ok: false, reason: "unknown_code" };
+  const entry = codes.get(code);
+  if (!entry) return { ok: false, reason: "unknown_code" };
 
-  // Delete first, so a concurrent consumer loses.
-  await redisDel(key);
-
-  let entry: AuthCode;
-  try {
-    entry = JSON.parse(raw) as AuthCode;
-  } catch {
-    return { ok: false, reason: "corrupt" };
+  if (entry.used) {
+    codes.delete(code);
+    return { ok: false, reason: "already_used" };
   }
-
+  if (Date.now() > entry.expiresAt) {
+    codes.delete(code);
+    return { ok: false, reason: "expired" };
+  }
   if (entry.mcpClientRedirectUri !== redirectUri) {
     return { ok: false, reason: "redirect_uri_mismatch" };
   }
@@ -141,6 +128,8 @@ export async function consumeAuthCode(
     }
   }
 
+  entry.used = true;
+  codes.delete(code);
   return { ok: true, entry };
 }
 
@@ -167,28 +156,31 @@ function base64UrlEncode(buf: Uint8Array | Buffer): string {
 export type AccessToken = {
   token: string;
   splitwiseToken: string;
+  expiresAt: number;
 };
 
-export async function issueBearerToken(
+const tokens = new Map<string, AccessToken>();
+
+export function issueBearerToken(
   splitwiseToken: string
-): Promise<AccessToken> {
+): AccessToken {
   const token = randomToken(32);
-  const entry: AccessToken = { token, splitwiseToken };
-  await redisSetEx(
-    TOKEN_PREFIX + token,
-    msToSec(TOKEN_TTL_MS),
-    JSON.stringify(entry)
-  );
-  log("TOKEN issued", { expires_in: msToSec(TOKEN_TTL_MS) });
+  const entry: AccessToken = {
+    token,
+    splitwiseToken,
+    expiresAt: Date.now() + TOKEN_TTL_MS,
+  };
+  tokens.set(token, entry);
+  log("TOKEN issued", { expires_in: Math.floor(TOKEN_TTL_MS / 1000) });
   return entry;
 }
 
-export async function findBearerToken(token: string): Promise<AccessToken | null> {
-  const raw = await redisGet(TOKEN_PREFIX + token);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as AccessToken;
-  } catch {
+export function findBearerToken(token: string): AccessToken | null {
+  const entry = tokens.get(token);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    tokens.delete(token);
     return null;
   }
+  return entry;
 }

@@ -1,7 +1,7 @@
 /**
- * Response cache for the Splitwise API, backed by Redis.
+ * In-memory response cache for the Splitwise API.
  *
- * Cache entries are stored as JSON strings at keys of the form:
+ * Cache entries are stored at keys of the form:
  *
  *   cache:u:<tokenHash>:<bucket>:<qualifier>   (per-user)
  *   cache:global:<bucket>                      (shared)
@@ -9,17 +9,19 @@
  * `tokenHash` is a short SHA-256 prefix of the caller's Splitwise bearer
  * token, so two users of this MCP server never see each other's data.
  *
- * Redis errors never propagate: a failed GET is treated as a miss and a
- * failed SET is silently dropped. We'd rather serve fresh uncached data than
- * 500 the tool call because the cache layer blew up.
- *
  * Invalidation is coarse — on mutations we delete the list keys and let
  * per-id keys age out on their short TTL. That's enough given the 60s
  * friends/groups TTL and is much simpler than reference-counting every key.
  */
 
-import { redisDel, redisGet, redisSetEx } from "./redis";
 import { log } from "./logger";
+
+type CacheEntry = {
+  value: string;
+  expiresAt: number;
+};
+
+const cache = new Map<string, CacheEntry>();
 
 /** Short, stable hash of the caller's token for cache scoping. */
 export function tokenHash(token: string): string {
@@ -37,16 +39,20 @@ function globalKey(bucket: string): string {
 }
 
 /**
- * Try to read `key` from Redis and JSON-parse it. Returns `null` on miss,
- * Redis error, or malformed JSON.
+ * Try to read `key` and JSON-parse it. Returns `null` on miss, expiry, or
+ * malformed JSON.
  */
 export async function cacheGet<T>(key: string): Promise<T | null> {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    cache.delete(key);
+    return null;
+  }
   try {
-    const raw = await redisGet(key);
-    if (!raw) return null;
-    return JSON.parse(raw) as T;
-  } catch (err) {
-    log("CACHE get error", { key, error: String(err) });
+    return JSON.parse(entry.value) as T;
+  } catch {
+    cache.delete(key);
     return null;
   }
 }
@@ -57,21 +63,18 @@ export async function cacheSet<T>(
   ttlSec: number,
   value: T
 ): Promise<void> {
-  try {
-    await redisSetEx(key, ttlSec, JSON.stringify(value));
-  } catch (err) {
-    log("CACHE set error", { key, error: String(err) });
-  }
+  cache.set(key, {
+    value: JSON.stringify(value),
+    expiresAt: Date.now() + ttlSec * 1000,
+  });
 }
 
 /** Delete cache entries by exact key. Never throws. */
 export async function cacheDel(...keys: string[]): Promise<void> {
-  try {
-    await redisDel(...keys);
-    if (keys.length > 0) log("CACHE invalidate", { keys });
-  } catch (err) {
-    log("CACHE del error", { keys, error: String(err) });
+  for (const key of keys) {
+    cache.delete(key);
   }
+  if (keys.length > 0) log("CACHE invalidate", { keys });
 }
 
 // --- Typed key builders for each cached bucket. ---
