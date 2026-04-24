@@ -34,6 +34,7 @@
 import { BASE_URL, PORT, REDIS_URL, SPLITWISE_REDIRECT_URI } from "./src/config";
 import { log } from "./src/logger";
 import { handleMcp } from "./src/mcp/session";
+import "dotenv/config";
 import { demoCallback, landingPage } from "./src/oauth/pages";
 import {
   authorizationServerMetadata,

@@ -8,7 +8,7 @@
  *   BASE_URL=https://manojs-macbook-air.stoat-toad.ts.net bun run oauth-mcp.ts
  */
 
-export const PORT = Number(Bun.env.PORT ?? 7021);
+export const PORT = Number(process.env.PORT ?? 7021);
 
 /**
  * Public base URL of this server. Used as the OAuth issuer, the resource URL,
@@ -17,7 +17,7 @@ export const PORT = Number(Bun.env.PORT ?? 7021);
  * When running behind a tunnel (ngrok / Tailscale funnel / etc.) set this to
  * the public URL so OAuth redirects work end-to-end.
  */
-export const BASE_URL = Bun.env.BASE_URL ?? `http://localhost:${PORT}`;
+export const BASE_URL = process.env.BASE_URL ?? `http://localhost:${PORT}`;
 
 /**
  * Splitwise OAuth app credentials. Create one at:
@@ -27,9 +27,9 @@ export const BASE_URL = Bun.env.BASE_URL ?? `http://localhost:${PORT}`;
  * `${BASE_URL}/auth/splitwise/callback`.
  */
 export const SPLITWISE_CLIENT_ID =
-  Bun.env.SPLITWISE_CLIENT_ID ?? "tSynJUXEQPlKwsd6OzeIOcIEJxKAgoEpLspm8oEK";
+process.env.SPLITWISE_CLIENT_ID ?? "tSynJUXEQPlKwsd6OzeIOcIEJxKAgoEpLspm8oEK";
 export const SPLITWISE_CLIENT_SECRET =
-  Bun.env.SPLITWISE_CLIENT_SECRET ?? "UA7SjONqHyDy7S4R88pxA1AOdIPat4uii91uCuV1";
+process.env.SPLITWISE_CLIENT_SECRET ?? "UA7SjONqHyDy7S4R88pxA1AOdIPat4uii91uCuV1";
 export const SPLITWISE_REDIRECT_URI = `${BASE_URL}/auth/splitwise/callback`;
 
 // Splitwise endpoints (hard-coded; these rarely change).
@@ -46,7 +46,7 @@ export const TOKEN_TTL_MS = 30 * 24 * 60 * 60_000; // our bearer tokens (30 days
  * Redis connection string. `Bun.redis` reads `REDIS_URL` automatically but we
  * re-export it here so the rest of the code has a single place to look.
  */
-export const REDIS_URL = Bun.env.REDIS_URL ?? "redis://localhost:6379";
+export const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 
 /**
  * TTLs for cached Splitwise API responses (seconds). Tuned to balance
