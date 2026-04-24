@@ -97,18 +97,19 @@ Bun.serve({
     }
 
     // Some clients probe OpenID Connect discovery before falling back to
-    // plain OAuth. We're not an OIDC provider, but replying 404 JSON quickly
-    // (instead of a generic text "Not found") makes clients give up in one
-    // step and move on to the OAuth metadata they should be using.
+    // plain OAuth. We're not an OIDC provider, so we return a plain 404 with
+    // NO body and NO content-type. It matters that the body is empty and is
+    // not JSON: opencode / MCP SDK's OAuth client parses any JSON body
+    // containing an `error` field as an RFC 6749 §5.2 OAuth error response,
+    // even on 404s — so shapes like `{"error":"not_an_openid_provider"}`
+    // cause the whole authorization flow to abort mid-callback. An empty
+    // 404 is the unambiguous "not available here, move on" signal.
     if (
       url.pathname === "/.well-known/openid-configuration" ||
       url.pathname === "/.well-known/openid-configuration/mcp" ||
       url.pathname === "/mcp/.well-known/openid-configuration"
     ) {
-      return new Response(
-        JSON.stringify({ error: "not_an_openid_provider" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
+      return new Response(null, { status: 404 });
     }
 
     // --- OAuth dance ---
