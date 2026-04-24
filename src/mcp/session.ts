@@ -79,10 +79,14 @@ export async function handleMcp(req: Request): Promise<Response> {
         method: req.method,
         activeSessions: sessions.size,
       });
-      return json({ error: "session_not_found" }, { status: 404 });
+      return handleStatelessMcp(req, headers, "unknown_session");
     }
     entry.lastUsed = Date.now();
-    log("MCP route -> existing session", { sid: incomingSid, method: req.method });
+    log("MCP route -> existing session", {
+      sid: incomingSid,
+      method: req.method,
+      rpc: await summarizeJsonRpcRequest(req),
+    });
     return entry.transport.handleRequest(new Request(req, { headers }));
   }
 
@@ -101,7 +105,7 @@ export async function handleMcp(req: Request): Promise<Response> {
       activeSessions: sessions.size,
     });
     if (req.method === "GET" && accept.includes("text/event-stream")) {
-      return sessionlessSseResponse();
+      return handleStatelessMcp(req, headers, "sessionless_get");
     }
     return json({ error: "session_required" }, { status: 400 });
   }
@@ -115,14 +119,17 @@ export async function handleMcp(req: Request): Promise<Response> {
   }
 
   if (!isInitializeRequest(parsedBody)) {
-    log("MCP non-init without session", { parsedBody });
-    return json(
-      {
-        jsonrpc: "2.0",
-        id: null,
-        error: { code: -32000, message: "Missing Mcp-Session-Id header" },
-      },
-      { status: 400 }
+    log("MCP non-init without session", {
+      rpc: summarizeJsonRpcBody(parsedBody),
+    });
+    return handleStatelessMcp(
+      new Request(req.url, {
+        method: req.method,
+        headers,
+        body: bodyText,
+      }),
+      headers,
+      "sessionless_post"
     );
   }
 
@@ -156,9 +163,41 @@ export async function handleMcp(req: Request): Promise<Response> {
 
   const server = buildMcpServer();
   await server.connect(transport);
-  log("MCP new session -> handling initialize");
+  log("MCP new session -> handling initialize", {
+    rpc: summarizeJsonRpcBody(parsedBody),
+  });
 
   return transport.handleRequest(new Request(req, { headers }), { parsedBody });
+}
+
+async function handleStatelessMcp(
+  req: Request,
+  headers: Headers,
+  reason: string
+): Promise<Response> {
+  // Our tools are pure request/response and keep all durable state in Redis via
+  // the bearer token, so a one-shot stateless transport is a safe fallback for
+  // clients that race, omit, or reuse Mcp-Session-Id across process restarts.
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+  transport.onerror = (err) => {
+    const error =
+      err instanceof Error
+        ? { name: err.name, message: err.message, stack: err.stack }
+        : err;
+    log("MCP stateless transport error", { reason, error });
+  };
+
+  const server = buildMcpServer();
+  await server.connect(transport);
+  log("MCP stateless fallback", {
+    reason,
+    method: req.method,
+    rpc: await summarizeJsonRpcRequest(req),
+  });
+  return transport.handleRequest(new Request(req, { headers }));
 }
 
 /** True if body is (or contains) an `initialize` JSON-RPC request. */
@@ -173,20 +212,36 @@ function isInitializeRequest(body: unknown): boolean {
   return false;
 }
 
-function sessionlessSseResponse(): Response {
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoder.encode(": sessionless compatibility stream\n\n"));
-    },
-  });
+async function summarizeJsonRpcRequest(req: Request): Promise<unknown> {
+  if (req.method !== "POST") return undefined;
+  try {
+    return summarizeJsonRpcBody(await req.clone().json());
+  } catch {
+    return "unreadable_json";
+  }
+}
 
-  return new Response(stream, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    },
-  });
+function summarizeJsonRpcBody(body: unknown): unknown {
+  if (Array.isArray(body)) return body.map(summarizeJsonRpcMessage);
+  return summarizeJsonRpcMessage(body);
+}
+
+function summarizeJsonRpcMessage(message: unknown): unknown {
+  if (!message || typeof message !== "object") return typeof message;
+  const msg = message as {
+    id?: unknown;
+    method?: unknown;
+    params?: { name?: unknown; clientInfo?: { name?: unknown; version?: unknown } };
+  };
+  return {
+    id: msg.id,
+    method: msg.method,
+    tool: msg.params?.name,
+    client: msg.params?.clientInfo
+      ? {
+          name: msg.params.clientInfo.name,
+          version: msg.params.clientInfo.version,
+        }
+      : undefined,
+  };
 }
