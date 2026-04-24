@@ -46,6 +46,10 @@ export type PendingAuth = {
   mcpClientId: string;
   mcpClientRedirectUri: string;
   mcpClientState: string;
+  /** PKCE: base64url(SHA-256(verifier)) if method is S256, raw verifier if "plain". */
+  codeChallenge?: string;
+  /** "S256" (preferred / required by MCP) or "plain". Absent = no PKCE. */
+  codeChallengeMethod?: "S256" | "plain";
 };
 
 export async function createPendingAuth(entry: PendingAuth): Promise<string> {
@@ -77,12 +81,17 @@ export type AuthCode = {
   mcpClientId: string;
   mcpClientRedirectUri: string;
   splitwiseToken: string;
+  /** PKCE code_challenge from the /authorize request, carried through to /token. */
+  codeChallenge?: string;
+  codeChallengeMethod?: "S256" | "plain";
 };
 
 export async function issueAuthCode(params: {
   mcpClientId: string;
   mcpClientRedirectUri: string;
   splitwiseToken: string;
+  codeChallenge?: string;
+  codeChallengeMethod?: "S256" | "plain";
 }): Promise<string> {
   const code = randomToken(16);
   const entry: AuthCode = { code, ...params };
@@ -95,10 +104,16 @@ export async function issueAuthCode(params: {
  * Atomically consume a one-shot code. Returns the entry when it's valid and
  * deletes it from Redis so a replay fails. All error branches also delete
  * the key for good measure.
+ *
+ * When the original /authorize carried a PKCE `code_challenge`, the caller
+ * must supply a matching `codeVerifier` — this implements RFC 7636 §4.6.
+ * If no challenge was recorded we accept any (or missing) verifier, keeping
+ * pre-PKCE clients working.
  */
 export async function consumeAuthCode(
   code: string,
-  redirectUri: string
+  redirectUri: string,
+  codeVerifier?: string
 ): Promise<{ ok: true; entry: AuthCode } | { ok: false; reason: string }> {
   const key = CODE_PREFIX + code;
   const raw = await redisGet(key);
@@ -118,7 +133,33 @@ export async function consumeAuthCode(
     return { ok: false, reason: "redirect_uri_mismatch" };
   }
 
+  if (entry.codeChallenge) {
+    if (!codeVerifier) return { ok: false, reason: "missing_code_verifier" };
+    const expected = await deriveChallenge(codeVerifier, entry.codeChallengeMethod ?? "plain");
+    if (expected !== entry.codeChallenge) {
+      return { ok: false, reason: "pkce_mismatch" };
+    }
+  }
+
   return { ok: true, entry };
+}
+
+/** Derive what the `code_challenge` should be for a given verifier + method. */
+async function deriveChallenge(
+  verifier: string,
+  method: "S256" | "plain"
+): Promise<string> {
+  if (method === "plain") return verifier;
+  // S256: base64url(SHA-256(verifier)).
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(verifier);
+  const digest = hasher.digest(); // Buffer
+  return base64UrlEncode(digest);
+}
+
+function base64UrlEncode(buf: Uint8Array | Buffer): string {
+  const b64 = Buffer.from(buf).toString("base64");
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 // ---------- BEARER TOKENS (what /mcp validates on every request) ----------

@@ -22,11 +22,12 @@
  *
  * Endpoints:
  *   GET  /                                          - landing page
- *   GET  /.well-known/oauth-authorization-server    - AS metadata
- *   GET  /.well-known/oauth-protected-resource      - PR metadata (MCP)
+ *   GET  /.well-known/oauth-authorization-server    - AS metadata (+ path-variants)
+ *   GET  /.well-known/oauth-protected-resource      - PR metadata (+ path-variants)
  *   GET  /authorize                                 - redirects to Splitwise
  *   GET  /auth/splitwise/callback                   - receives Splitwise code
- *   POST /token                                     - exchanges our code for our bearer
+ *   POST /token                                     - exchanges our code for our bearer (PKCE verified)
+ *   POST /register                                  - RFC 7591 Dynamic Client Registration
  *   GET  /callback-demo                             - built-in demo client
  *   *    /mcp                                       - MCP endpoint (bearer required)
  */
@@ -39,6 +40,7 @@ import { demoCallback, landingPage } from "./src/oauth/pages";
 import {
   authorizationServerMetadata,
   handleAuthorize,
+  handleRegister,
   handleSplitwiseCallback,
   handleToken,
   protectedResourceMetadata,
@@ -118,6 +120,9 @@ Bun.serve({
     }
     if (url.pathname === "/token" && req.method === "POST") {
       return handleToken(req);
+    }
+    if (url.pathname === "/register" && req.method === "POST") {
+      return handleRegister(req);
     }
 
     // --- Demo MCP client (browser) ---
