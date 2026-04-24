@@ -25,8 +25,38 @@ import { buildMcpServer } from "./server";
  * process and can't be serialized. The practical consequence is that this
  * server must run as a single process; horizontal scaling would require
  * sticky sessions (or re-initialising on each replica).
+ *
+ * We also track a `lastUsed` timestamp so stale sessions (clients that spun
+ * one up during OAuth discovery and then forgot about it) get reaped rather
+ * than leaking forever.
  */
-const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>();
+type SessionEntry = {
+  transport: WebStandardStreamableHTTPServerTransport;
+  lastUsed: number;
+};
+
+const sessions = new Map<string, SessionEntry>();
+
+/**
+ * Idle sessions get reaped after this long. A normal client will send traffic
+ * well within this window (initialize, tools/list, tool calls). Anything
+ * quieter is almost certainly an abandoned session from a re-running
+ * discovery dance, and keeping it around just leaks the transport + the
+ * `McpServer` instance attached to it.
+ */
+const SESSION_IDLE_MS = 10 * 60_000;
+
+/** Periodic sweep. Cheap: O(sessions) and sessions are single-digit in practice. */
+setInterval(() => {
+  const now = Date.now();
+  for (const [sid, entry] of sessions) {
+    if (now - entry.lastUsed > SESSION_IDLE_MS) {
+      sessions.delete(sid);
+      void entry.transport.close().catch(() => {});
+      log("MCP session reaped (idle)", { sid });
+    }
+  }
+}, 60_000).unref?.();
 
 export async function handleMcp(req: Request): Promise<Response> {
   const bearer = await verifyBearer(req);
@@ -42,13 +72,14 @@ export async function handleMcp(req: Request): Promise<Response> {
 
   // --- Existing session: route straight to its transport. ---
   if (incomingSid) {
-    const transport = sessions.get(incomingSid);
-    if (!transport) {
+    const entry = sessions.get(incomingSid);
+    if (!entry) {
       log("MCP unknown session", { incomingSid });
       return json({ error: "session_not_found" }, { status: 404 });
     }
+    entry.lastUsed = Date.now();
     log("MCP route -> existing session", { sid: incomingSid, method: req.method });
-    return transport.handleRequest(new Request(req, { headers }));
+    return entry.transport.handleRequest(new Request(req, { headers }));
   }
 
   // --- No session id. Only valid if this is an `initialize` POST. ---
@@ -77,10 +108,18 @@ export async function handleMcp(req: Request): Promise<Response> {
   }
 
   // --- New session. Spin up a fresh server+transport pair. ---
+  //
+  // `enableJsonResponse: true` makes the transport reply to POSTs with a
+  // one-shot JSON body instead of an SSE stream. The MCP Streamable HTTP
+  // spec explicitly allows this, and for our tools (simple request/response,
+  // no server-initiated streaming) it's strictly better: clients don't have
+  // to drain an SSE stream between requests, so a slow client doesn't
+  // head-of-line-block the next POST on the same connection.
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => crypto.randomUUID(),
+    enableJsonResponse: true,
     onsessioninitialized: (sid: string) => {
-      sessions.set(sid, transport);
+      sessions.set(sid, { transport, lastUsed: Date.now() });
       log("MCP session initialized", { sid });
     },
     onsessionclosed: (sid: string) => {

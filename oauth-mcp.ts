@@ -70,11 +70,43 @@ Bun.serve({
     if (url.pathname === "/" && req.method === "GET") {
       return landingPage();
     }
-    if (url.pathname === "/.well-known/oauth-authorization-server") {
+
+    // OAuth 2.1 Authorization Server metadata (RFC 8414).
+    // Our resource lives at `${BASE_URL}/mcp`, so RFC 8414-compliant clients
+    // try the path-suffixed variant. A few clients also try the path-prefixed
+    // variant (`/mcp/.well-known/...`). We serve the same payload from all of
+    // them so discovery converges in a single hop instead of cascading through
+    // 404s that make clients drop their bearer and re-run the OAuth dance.
+    if (
+      url.pathname === "/.well-known/oauth-authorization-server" ||
+      url.pathname === "/.well-known/oauth-authorization-server/mcp" ||
+      url.pathname === "/mcp/.well-known/oauth-authorization-server"
+    ) {
       return authorizationServerMetadata();
     }
-    if (url.pathname === "/.well-known/oauth-protected-resource") {
+
+    // Protected-Resource metadata (RFC 9728). Same reasoning as above.
+    if (
+      url.pathname === "/.well-known/oauth-protected-resource" ||
+      url.pathname === "/.well-known/oauth-protected-resource/mcp" ||
+      url.pathname === "/mcp/.well-known/oauth-protected-resource"
+    ) {
       return protectedResourceMetadata();
+    }
+
+    // Some clients probe OpenID Connect discovery before falling back to
+    // plain OAuth. We're not an OIDC provider, but replying 404 JSON quickly
+    // (instead of a generic text "Not found") makes clients give up in one
+    // step and move on to the OAuth metadata they should be using.
+    if (
+      url.pathname === "/.well-known/openid-configuration" ||
+      url.pathname === "/.well-known/openid-configuration/mcp" ||
+      url.pathname === "/mcp/.well-known/openid-configuration"
+    ) {
+      return new Response(
+        JSON.stringify({ error: "not_an_openid_provider" }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
     }
 
     // --- OAuth dance ---
