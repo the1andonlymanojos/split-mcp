@@ -19,10 +19,17 @@ import { log } from "../logger";
 import { unauthorized, verifyBearer } from "../oauth/bearer";
 import { buildMcpServer } from "./server";
 
+/**
+ * Live MCP transports, keyed by `Mcp-Session-Id`. Intentionally NOT moved to
+ * Redis — these values are open streaming connection objects tied to this
+ * process and can't be serialized. The practical consequence is that this
+ * server must run as a single process; horizontal scaling would require
+ * sticky sessions (or re-initialising on each replica).
+ */
 const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>();
 
 export async function handleMcp(req: Request): Promise<Response> {
-  const bearer = verifyBearer(req);
+  const bearer = await verifyBearer(req);
   if (!bearer) return unauthorized("Missing or invalid bearer token");
 
   // Tool handlers read `x-splitwise-token` from their requestInfo; injecting

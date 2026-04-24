@@ -5,7 +5,10 @@
   "private": true,
   "scripts": {
     "dev": "bun --watch oauth-mcp.ts",
-    "start": "bun run oauth-mcp.ts"
+    "start": "bun run oauth-mcp.ts",
+    "test": "bun test",
+    "test:read": "bun test tests/client.read.test.ts",
+    "test:write": "SPLITWISE_TEST_WRITE=1 bun test tests/client.write.test.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

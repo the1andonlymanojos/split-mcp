@@ -8,7 +8,7 @@
  *   BASE_URL=https://manojs-macbook-air.stoat-toad.ts.net bun run oauth-mcp.ts
  */
 
-export const PORT = Number(Bun.env.PORT ?? 3000);
+export const PORT = Number(Bun.env.PORT ?? 7021);
 
 /**
  * Public base URL of this server. Used as the OAuth issuer, the resource URL,
@@ -37,7 +37,29 @@ export const SPLITWISE_AUTHORIZE_URL = "https://secure.splitwise.com/oauth/autho
 export const SPLITWISE_TOKEN_URL = "https://secure.splitwise.com/oauth/token";
 export const SPLITWISE_API_BASE = "https://secure.splitwise.com/api/v3.0";
 
-// Lifetimes for in-memory OAuth state.
-export const PENDING_TTL_MS = 10 * 60_000; // /authorize -> Splitwise round-trip
-export const CODE_TTL_MS = 60_000; //        our authorization codes
-export const TOKEN_TTL_MS = 60 * 60_000; //  our bearer tokens
+// Lifetimes for OAuth state stored in Redis.
+export const PENDING_TTL_MS = 10 * 60_000; //       /authorize -> Splitwise round-trip
+export const CODE_TTL_MS = 60_000; //                our authorization codes
+export const TOKEN_TTL_MS = 30 * 24 * 60 * 60_000; // our bearer tokens (30 days)
+
+/**
+ * Redis connection string. `Bun.redis` reads `REDIS_URL` automatically but we
+ * re-export it here so the rest of the code has a single place to look.
+ */
+export const REDIS_URL = Bun.env.REDIS_URL ?? "redis://localhost:6379";
+
+/**
+ * TTLs for cached Splitwise API responses (seconds). Tuned to balance
+ * responsiveness against staleness:
+ *   - Things that rarely change (currencies, categories) → 24h.
+ *   - User profile → 5 min.
+ *   - Friends / groups → 60s, and we explicitly invalidate them on mutations.
+ *   - Expenses / comments / notifications are NOT cached (too volatile / too
+ *     important to be fresh).
+ * Tool handlers also expose a `force_refresh: true` flag that bypasses the
+ * cache for one call.
+ */
+export const CACHE_TTL_USER_SEC = 5 * 60;
+export const CACHE_TTL_FRIENDS_SEC = 5*60;
+export const CACHE_TTL_GROUPS_SEC = 5*60;
+export const CACHE_TTL_METADATA_SEC = 24 * 60 * 60;

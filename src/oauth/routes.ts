@@ -63,7 +63,7 @@ export function protectedResourceMetadata(): Response {
  * `state` and forward the user to Splitwise. On the way back we'll look the
  * state up to know where to redirect.
  */
-export function handleAuthorize(url: URL): Response {
+export async function handleAuthorize(url: URL): Promise<Response> {
   const clientId = url.searchParams.get("client_id") ?? "";
   const redirectUri = url.searchParams.get("redirect_uri") ?? "";
   const responseType = url.searchParams.get("response_type") ?? "";
@@ -81,7 +81,7 @@ export function handleAuthorize(url: URL): Response {
     );
   }
 
-  const state = createPendingAuth({
+  const state = await createPendingAuth({
     mcpClientId: clientId,
     mcpClientRedirectUri: redirectUri,
     mcpClientState: mcpState,
@@ -110,7 +110,7 @@ export async function handleSplitwiseCallback(url: URL): Promise<Response> {
     return html("Missing code or state from Splitwise.", { status: 400 });
   }
 
-  const pending = consumePendingAuth(state);
+  const pending = await consumePendingAuth(state);
   if (!pending) {
     return html("Unknown or expired state.", { status: 400 });
   }
@@ -123,7 +123,7 @@ export async function handleSplitwiseCallback(url: URL): Promise<Response> {
     );
   }
 
-  const ourCode = issueAuthCode({
+  const ourCode = await issueAuthCode({
     mcpClientId: pending.mcpClientId,
     mcpClientRedirectUri: pending.mcpClientRedirectUri,
     splitwiseToken: tokenResponse.access_token,
@@ -168,13 +168,13 @@ export async function handleToken(req: Request): Promise<Response> {
     return json({ error: "unsupported_grant_type" }, { status: 400 });
   }
 
-  const result = consumeAuthCode(code, redirectUri);
+  const result = await consumeAuthCode(code, redirectUri);
   if (!result.ok) {
     log("TOKEN invalid_grant", { reason: result.reason });
     return json({ error: "invalid_grant" }, { status: 400 });
   }
 
-  const bearer = issueBearerToken(result.entry.splitwiseToken);
+  const bearer = await issueBearerToken(result.entry.splitwiseToken);
   return json({
     access_token: bearer.token,
     token_type: "Bearer",

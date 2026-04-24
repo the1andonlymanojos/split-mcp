@@ -13,7 +13,7 @@ import { findBearerToken, type AccessToken } from "./store";
  * Extract and validate the `Authorization: Bearer …` header. Returns the
  * token entry on success or `null` when it's missing / unknown / expired.
  */
-export function verifyBearer(req: Request): AccessToken | null {
+export async function verifyBearer(req: Request): Promise<AccessToken | null> {
   const auth = req.headers.get("authorization") ?? "";
   const m = auth.match(/^Bearer\s+(.+)$/i);
   if (!m) return null;
