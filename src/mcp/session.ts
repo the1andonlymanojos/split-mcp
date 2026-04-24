@@ -87,7 +87,22 @@ export async function handleMcp(req: Request): Promise<Response> {
   }
 
   // --- No session id. Only valid if this is an `initialize` POST. ---
+  //
+  // opencode sometimes opens a bare GET /mcp notification stream after a
+  // successful initialize, without echoing Mcp-Session-Id. The actual tools
+  // flow is still POST-based, so treat that GET as a harmless compatibility
+  // stream instead of failing the whole "get tools" validation.
   if (req.method !== "POST") {
+    const accept = headers.get("accept") ?? "";
+    log("MCP request without session", {
+      method: req.method,
+      accept,
+      userAgent: headers.get("user-agent"),
+      activeSessions: sessions.size,
+    });
+    if (req.method === "GET" && accept.includes("text/event-stream")) {
+      return sessionlessSseResponse();
+    }
     return json({ error: "session_required" }, { status: 400 });
   }
 
@@ -156,4 +171,22 @@ function isInitializeRequest(body: unknown): boolean {
     return (body as { method?: string }).method === "initialize";
   }
   return false;
+}
+
+function sessionlessSseResponse(): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(": sessionless compatibility stream\n\n"));
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
 }
