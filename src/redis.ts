@@ -39,7 +39,7 @@ export async function redisInit(): Promise<void> {
       )
     ),
   ]);
-  log("REDIS connected", { url: REDIS_URL, pong });
+  log("REDIS co  nnected", { url: REDIS_URL, pong });
 }
 
 /** SET key value EX ttlSec. */
