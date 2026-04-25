@@ -11,7 +11,7 @@ import { registerAllTools } from "./tools";
 
 export function buildMcpServer(): McpServer {
   const server = new McpServer({
-    name: "splitwise-mcp",
+    name: "splitMCP",
     version: "1.0.0",
   });
   registerAllTools(server);

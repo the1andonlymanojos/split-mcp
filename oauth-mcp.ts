@@ -140,7 +140,7 @@ Bun.serve({
 });
 
 console.log(`
-Splitwise MCP server running:
+splitMCP server running:
   local:  http://localhost:${PORT}
   public: ${BASE_URL}
 Splitwise redirect_uri (must match your app's registered URL):
